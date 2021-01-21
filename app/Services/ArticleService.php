@@ -2,10 +2,9 @@
 namespace App\Services;
 
 use App\Http\Requests\CommentRequest;
+use App\Jobs\AddComment;
 use App\Models\Article;
-use App\Models\Comment;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Cache;
 
 class ArticleService
 {
@@ -16,20 +15,7 @@ class ArticleService
      */
     public function saveComment(CommentRequest $request)
     {
-
-        $postedAt = Carbon::now();
-        sleep(10);
-        try {
-            $comment = new Comment();
-            $comment->article_id = $request->article_id;
-            $comment->subject = $request->subject;
-            $comment->body = $request->body;
-            $comment->posted_at = $postedAt;
-            $comment->save();
-        } catch (\Exception $e) {
-            return 0;
-        }
-        return 1;
+        dispatch((new AddComment($request->article_id, $request->subject, $request->body, Carbon::now()))->delay(10));
     }
 
     /**
@@ -49,7 +35,7 @@ class ArticleService
      */
     public function likeArticle(int $articleId): int
     {
-        sleep(5); //sleep for testing
+        sleep(3); //sleep for testing
         return $this->incrementArticleCounter('likes', $articleId);
     }
 
@@ -61,62 +47,17 @@ class ArticleService
      */
     public function incrementArticleCounter(string $fieldName, int $articleId): int
     {
-        $article = null;
-        while ($this->isArticleLocked($articleId)) { // waiting until article will be unlocked
-            usleep(50);
-        }
-        $this->lockArticle($articleId, $fieldName);
-        $article = $this->getById($articleId); // get fresh article from db, because article could be changed after unlock
-
-        $article->{$fieldName}++;
-        $article->save();
-        $this->unlockArticle($articleId, $fieldName);
-        return $article->$fieldName;
-    }
-
-
-    /**
-     * check if article is locked
-     * @param int $articleId
-     * @return bool
-     */
-    private function isArticleLocked(int $articleId): bool
-    {
-        $lock_key = $this->getLockKey($articleId);
-        return Cache::has($lock_key);
-    }
-
-    /**
-     * lock article
-     * @param int $articleId
-     * @param string $key
-     */
-    private function lockArticle(int $articleId, string $key)
-    {
-        $lock_key = $this->getLockKey($articleId, $key);
-        Cache::put($lock_key, true, 20);
-    }
-
-    /**
-     * unlock article
-     * @param int $articleId
-     * @param string $key
-     */
-    private function unlockArticle(int $articleId, string $key)
-    {
-        $lock_key = $this->getLockKey($articleId, $key);
-        Cache::forget($lock_key);
-    }
-
-    /**
-     * returns lock key
-     * @param int $articleId
-     * @param string $key
-     * @return string
-     */
-    private function getLockKey(int $articleId, string $key = 'like'): string
-    {
-        return 'article_lock_'.$key.$articleId;
+       if($articleId){
+           $article = $this->getById($articleId); // get fresh article from db, because article could be changed after unlock
+            if (!$article){
+                return 0;
+            }
+           $article->increment($fieldName);
+           $article->save();
+           return $article->$fieldName;
+       }else{
+           return 0;
+       }
     }
 
     /**
